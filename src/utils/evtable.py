@@ -7,8 +7,8 @@ This is an advanced ASCII table creator. It was inspired
 by prettytable but shares no code.
 
 WARNING: UNDER DEVELOPMENT. Evtable does currently NOT support
-colour ANSI markers in the table. Non-colour tables should 
-work fully (so make issues if they don't). 
+colour ANSI markers in the table. Non-colour tables should
+work fully (so make issues if they don't).
 
 
 Example usage:
@@ -72,15 +72,169 @@ It is intended to be used with ANSIString for supporting
 ANSI-coloured string types.
 
 """
-from textwrap import wrap
+#from textwrap import wrap
+from textwrap import TextWrapper
 from copy import deepcopy, copy
-
-#from src.utils.ansi import ANSIString
+from src.utils.ansi import ANSIString
 
 def make_iter(obj):
     "Makes sure that the object is always iterable."
     return not hasattr(obj, '__iter__') and [obj] or obj
 
+def _to_ansi(obj, regexable=False):
+    "convert to ANSIString"
+    if hasattr(obj, "__iter__"):
+        return [_to_ansi(o) for o in obj]
+    else:
+        return ANSIString(unicode(obj), regexable=regexable)
+
+
+_unicode = unicode
+_whitespace = '\t\n\x0b\x0c\r '
+class ANSITextWrapper(TextWrapper):
+
+    def _munge_whitespace(self, text):
+        """_munge_whitespace(text : string) -> string
+
+        Munge whitespace in text: expand tabs and convert all other
+        whitespace characters to spaces.  Eg. " foo\tbar\n\nbaz"
+        becomes " foo    bar  baz".
+        """
+        # ignore expand_tabs/replace_whitespace until ANSISTring handles them
+        return text
+        if self.expand_tabs:
+            text = text.expandtabs()
+        if self.replace_whitespace:
+            if isinstance(text, str):
+                text = text.translate(self.whitespace_trans)
+            elif isinstance(text, _unicode):
+                text = text.translate(self.unicode_whitespace_trans)
+        return text
+
+
+    def _split(self, text):
+        """_split(text : string) -> [string]
+
+        Split the text to wrap into indivisible chunks.  Chunks are
+        not quite the same as words; see _wrap_chunks() for full
+        details.  As an example, the text
+          Look, goof-ball -- use the -b option!
+        breaks into the following chunks:
+          'Look,', ' ', 'goof-', 'ball', ' ', '--', ' ',
+          'use', ' ', 'the', ' ', '-b', ' ', 'option!'
+        if break_on_hyphens is True, or in:
+          'Look,', ' ', 'goof-ball', ' ', '--', ' ',
+          'use', ' ', 'the', ' ', '-b', ' ', option!'
+        otherwise.
+        """
+        # only use unicode wrapper
+        if self.break_on_hyphens:
+            pat = self.wordsep_re_uni
+        else:
+            pat = self.wordsep_simple_re_uni
+        chunks = pat.split(_to_ansi(text, regexable=True))
+        chunks = filter(None, chunks)  # remove empty chunks
+        return chunks
+
+    def _wrap_chunks(self, chunks):
+        """_wrap_chunks(chunks : [string]) -> [string]
+
+        Wrap a sequence of text chunks and return a list of lines of
+        length 'self.width' or less.  (If 'break_long_words' is false,
+        some lines may be longer than this.)  Chunks correspond roughly
+        to words and the whitespace between them: each chunk is
+        indivisible (modulo 'break_long_words'), but a line break can
+        come between any two chunks.  Chunks should not have internal
+        whitespace; ie. a chunk is either all whitespace or a "word".
+        Whitespace chunks will be removed from the beginning and end of
+        lines, but apart from that whitespace is preserved.
+        """
+        lines = []
+        if self.width <= 0:
+            raise ValueError("invalid width %r (must be > 0)" % self.width)
+
+        # Arrange in reverse order so items can be efficiently popped
+        # from a stack of chucks.
+        chunks.reverse()
+
+        while chunks:
+
+            # Start the list of chunks that will make up the current line.
+            # cur_len is just the length of all the chunks in cur_line.
+            cur_line = []
+            cur_len = 0
+
+            # Figure out which static string will prefix this line.
+            if lines:
+                indent = self.subsequent_indent
+            else:
+                indent = self.initial_indent
+
+            # Maximum width for this line.
+            width = self.width - len(indent)
+
+            # First chunk on line is whitespace -- drop it, unless this
+            # is the very beginning of the text (ie. no lines started yet).
+            if self.drop_whitespace and chunks[-1].strip() == '' and lines:
+                del chunks[-1]
+
+            while chunks:
+                l = len(chunks[-1])
+
+                # Can at least squeeze this chunk onto the current line.
+                if cur_len + l <= width:
+                    cur_line.append(chunks.pop())
+                    cur_len += l
+
+                # Nope, this line is full.
+                else:
+                    break
+
+            # The current line is full, and the next chunk is too big to
+            # fit on *any* line (not just this one).
+            if chunks and len(chunks[-1]) > width:
+                self._handle_long_word(chunks, cur_line, cur_len, width)
+
+            # If the last chunk on this line is all whitespace, drop it.
+            if self.drop_whitespace and cur_line and cur_line[-1].strip() == '':
+                del cur_line[-1]
+
+            # Convert current line back to a string and store it in list
+            # of all lines (return value).
+            if cur_line:
+                l = ""
+                for w in cur_line:   # ANSI fix
+                    l += w           #
+                lines.append(indent + l)
+        return lines
+
+
+# -- Convenience interface ---------------------------------------------
+
+def wrap(text, width=70, **kwargs):
+    """Wrap a single paragraph of text, returning a list of wrapped lines.
+
+    Reformat the single paragraph in 'text' so it fits in lines of no
+    more than 'width' columns, and return a list of wrapped lines.  By
+    default, tabs in 'text' are expanded with string.expandtabs(), and
+    all other whitespace characters (including newline) are converted to
+    space.  See TextWrapper class for available keyword args to customize
+    wrapping behaviour.
+    """
+    w = ANSITextWrapper(width=width, **kwargs)
+    return w.wrap(text)
+
+def fill(text, width=70, **kwargs):
+    """Fill a single paragraph of text, returning a new string.
+
+    Reformat the single paragraph in 'text' to fit in lines of no more
+    than 'width' columns, and return a new string containing the entire
+    wrapped paragraph.  As with wrap(), tabs are expanded and other
+    whitespace characters converted to space.  See TextWrapper class for
+    available keyword args to customize wrapping behaviour.
+    """
+    w = ANSITextWrapper(width=width, **kwargs)
+    return w.fill(text)
 
 # Cell class (see further down for the EvTable itself)
 
@@ -196,8 +350,8 @@ class Cell(object):
         self.align = kwargs.get("align", "c")
         self.valign = kwargs.get("valign", "c")
 
-        self.data = self._split_lines(unicode(data))
-        #self.data = self._split_lines(ANSIString(unicode(data)))
+        #self.data = self._split_lines(unicode(data))
+        self.data = self._split_lines(_to_ansi(data))
         self.raw_width = max(len(line) for line in self.data)
         self.raw_height = len(self.data)
 
@@ -237,7 +391,9 @@ class Cell(object):
         adjusted_data = []
         for line in data:
             if 0 < width < len(line):
-                adjusted_data.extend(wrap(line, width=width, drop_whitespace=False))
+                # replace_whitespace=False, expand_tabs=False is a
+                # fix for ANSIString not supporting expand_tabs/translate
+                adjusted_data.extend([ANSIString(part + "{n") for part in wrap(line, width=width, drop_whitespace=False)])
             else:
                 adjusted_data.append(line)
         if self.enforce_size:
@@ -368,8 +524,8 @@ class Cell(object):
 
         kwargs - like when creating the cell anew.
         """
-        self.data = self._split_lines(unicode(data))
-        #self.data = self._split_lines(ANSIString(unicode(data)))
+        #self.data = self._split_lines(unicode(data))
+        self.data = self._split_lines(_to_ansi(data))
         self.raw_width = max(len(line) for line in self.data)
         self.raw_height = len(self.data)
         self.reformat(**kwargs)
@@ -460,6 +616,7 @@ class EvTable(object):
     all cell boundaries lining up.
     """
 
+
     def __init__(self, *args, **kwargs):
         """
          Args:
@@ -523,7 +680,7 @@ class EvTable(object):
                     self.table.extend([] for i in range(excess))
                 elif excess < 0:
                     # too short header
-                    header.extend(["" for i in range(abs(excess))])
+                    header.extend(_to_ansi(["" for i in range(abs(excess))]))
                 for ix, heading in enumerate(header):
                     self.table[ix].insert(0, heading)
             else:
