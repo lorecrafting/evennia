@@ -518,7 +518,7 @@ class ANSIString(unicode):
         escapes, and which are for the readable text.
         """
         self.parser = kwargs.pop('parser', ANSI_PARSER)
-        super(ANSIString, self).__init__(*args, **kwargs)
+        super(ANSIString, self).__init__()
         self._raw_string = unicode(self)
         self._clean_string = unicode(self.parser.parse_ansi(
             self._raw_string, strip_ansi=True), 'utf-8')
